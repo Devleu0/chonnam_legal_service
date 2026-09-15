@@ -9,9 +9,28 @@ from __future__ import annotations
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableLambda, RunnablePassthrough
-from langchain_openai import ChatOpenAI
 
 from src.rag.infra_mapping import format_infra_markdown, recommend_infra
+
+
+def build_llm(provider: str, model_name: str, temperature: float = 0.0):
+    """provider(openai/gemini/claude)에 맞는 LangChain Chat 모델 인스턴스를 생성한다.
+
+    2026-09 기준 실제 사용 가능한 최신 모델로 검증된 값만 config.PROVIDER_MODELS 에 등록되어 있다.
+    """
+    if provider == "openai":
+        from langchain_openai import ChatOpenAI
+
+        return ChatOpenAI(model=model_name, temperature=temperature)
+    if provider == "gemini":
+        from langchain_google_genai import ChatGoogleGenerativeAI
+
+        return ChatGoogleGenerativeAI(model=model_name, temperature=temperature)
+    if provider == "claude":
+        from langchain_anthropic import ChatAnthropic
+
+        return ChatAnthropic(model=model_name, temperature=temperature)
+    raise ValueError(f"지원하지 않는 provider: {provider}")
 
 SYSTEM_TEMPLATE = """
 당신은 광주/전남 지역의 스타트업 및 중소기업을 위한 B2B 맞춤형 법률·규정 검토 전문 AI 에이전트입니다.
@@ -39,13 +58,15 @@ def format_docs(docs) -> str:
     return "\n\n".join(lines)
 
 
-def build_rag_chain(retriever, model_name: str = "gpt-4o-mini", temperature: float = 0.0):
+def build_rag_chain(retriever, provider: str = "openai", model_name: str = "gpt-5.5", temperature: float = 0.0):
     """검색기 + LLM + 프롬프트를 결합한 RAG 체인을 반환한다.
+
+    provider: "openai" | "gemini" | "claude"
 
     체인은 (answer, source_docs) 형태가 아닌, 지역 인프라 연계 정보까지
     포함된 최종 마크다운 문자열을 반환하는 하나의 함수(invoke(question)->str)로 노출한다.
     """
-    llm = ChatOpenAI(model=model_name, temperature=temperature)
+    llm = build_llm(provider, model_name, temperature)
 
     base_chain = (
         {"context": retriever | format_docs, "question": RunnablePassthrough()}
@@ -64,9 +85,9 @@ def build_rag_chain(retriever, model_name: str = "gpt-4o-mini", temperature: flo
     return RunnableLambda(_invoke_with_infra)
 
 
-def build_naive_llm_chain(model_name: str = "gpt-4o-mini", temperature: float = 0.0):
+def build_naive_llm_chain(provider: str = "openai", model_name: str = "gpt-5.5", temperature: float = 0.0):
     """검색(RAG) 미적용 순수 LLM 체인. 평가 시 환각 억제 효과의 대조군으로 사용."""
-    llm = ChatOpenAI(model=model_name, temperature=temperature)
+    llm = build_llm(provider, model_name, temperature)
     naive_prompt = ChatPromptTemplate.from_template(
         "당신은 법률 상담 AI입니다. 다음 질문에 답하세요.\n\n[질문]\n{question}"
     )

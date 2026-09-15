@@ -11,9 +11,16 @@
     <aside class="sidebar">
       <h2>🔑 5조 진흥 설정 패널</h2>
 
-      <label for="apiKey">OpenAI API Key</label>
+      <label for="providerSelect">LLM 제공사</label>
+      <select id="providerSelect">
+        <option value="openai">OpenAI</option>
+        <option value="gemini">Google Gemini</option>
+        <option value="claude">Anthropic Claude</option>
+      </select>
+
+      <label for="apiKey" id="apiKeyLabel">OpenAI API Key</label>
       <input type="password" id="apiKey" placeholder="sk-..." />
-      <p class="hint">키는 브라우저(localStorage)에만 저장되며 서버로 전송되지 않습니다. 이 페이지는 정적 페이지이며, 질문 시 브라우저가 OpenAI API를 직접 호출합니다.</p>
+      <p class="hint">키는 브라우저(localStorage)에 제공사별로 각각 저장되며 서버로 전송되지 않습니다. 이 페이지는 정적 페이지이며, 질문 시 브라우저가 선택한 제공사의 API를 직접 호출합니다.</p>
 
       <hr />
 
@@ -28,12 +35,8 @@
       <input type="range" id="topK" min="1" max="5" value="3" />
       <span id="topKValue">3</span>
 
-      <label for="modelName">LLM 모델</label>
-      <select id="modelName">
-        <option value="gpt-4o-mini">gpt-4o-mini</option>
-        <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
-        <option value="gpt-4o">gpt-4o</option>
-      </select>
+      <label for="modelName">LLM 모델 (2026-09 기준 사용 가능 모델만 제공)</label>
+      <select id="modelName"></select>
 
       <hr />
       <p class="hint">본 페이지는 5조 진흥의 『LLM을 활용한 지역 법률 상담 서비스 시스템 개발』 제안서를 바탕으로 제작된 GitHub Pages 정적 프로토타입입니다.</p>

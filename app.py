@@ -22,15 +22,20 @@ st.set_page_config(page_title="지역 법률 상담 서비스", page_icon="⚖�
 # 1. 사이드바: API 키 및 검색 옵션
 # ---------------------------------------------------------
 st.sidebar.title("🔑 5조 진흥 설정 패널")
-api_key = st.sidebar.text_input("OpenAI API Key를 입력하세요", type="password")
+
+provider_label_to_key = {v: k for k, v in config.PROVIDER_LABELS.items()}
+provider_label = st.sidebar.selectbox("LLM 제공사", list(config.PROVIDER_LABELS.values()), index=0)
+provider = provider_label_to_key[provider_label]
+
+api_key = st.sidebar.text_input(f"{provider_label} API Key를 입력하세요", type="password")
 if api_key:
-    os.environ["OPENAI_API_KEY"] = api_key
+    os.environ[config.PROVIDER_ENV_KEY[provider]] = api_key
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("검색 옵션")
 region_filter = st.sidebar.selectbox("지역 필터", ["전체", "광주", "전남"], index=0)
 top_k = st.sidebar.slider("검색 문서 수 (k)", min_value=1, max_value=5, value=config.TOP_K)
-model_name = st.sidebar.selectbox("LLM 모델", ["gpt-4o-mini", "gpt-3.5-turbo", "gpt-4o"], index=0)
+model_name = st.sidebar.selectbox("LLM 모델 (2026-09 기준 사용 가능 모델만 제공)", config.PROVIDER_MODELS[provider], index=0)
 
 st.sidebar.markdown("---")
 st.sidebar.caption("본 프로토타입은 5조 진흥의 '『LLM을 활용한 지역 법률 상담 서비스 시스템 개발』' 제안서를 바탕으로 제작되었습니다.")
@@ -68,11 +73,11 @@ with st.expander("💬 예시 질문 보기"):
     )
 
 if not api_key:
-    st.warning("👈 왼쪽 패널에 OpenAI API Key를 입력해야 서비스를 시작할 수 있습니다.")
+    st.warning(f"👈 왼쪽 패널에 {provider_label} API Key를 입력해야 서비스를 시작할 수 있습니다.")
     st.stop()
 
 retriever = get_retriever(top_k)
-rag_chain = build_rag_chain(retriever, model_name=model_name)
+rag_chain = build_rag_chain(retriever, provider=provider, model_name=model_name)
 
 # ---------------------------------------------------------
 # 4. 채팅 인터페이스
