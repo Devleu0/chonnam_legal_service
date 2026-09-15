@@ -4,10 +4,10 @@
  * 서버가 없으므로:
  *  - 법령 청크 데이터(data/chunks.json)를 브라우저에서 직접 로드
  *  - TF-IDF 기반 경량 키워드 검색으로 관련 조문 검색 (구조적 청킹 데이터 활용)
- *  - 검색된 근거를 프롬프트에 주입하여 OpenAI Chat Completions API를 브라우저에서 직접 호출
+ *  - 검색된 근거를 프롬프트에 주입하여 OpenAI / Google Gemini / Anthropic Claude 중 선택된 제공사의 API를 브라우저에서 직접 호출
  *  - 지역 법률 인프라 자동 매핑 로직 포함
  *
- * 주의: API 키는 localStorage에만 저장되고 브라우저에서 OpenAI로 직접 전송됩니다.
+ * 주의: API 키는 제공사별로 localStorage에만 저장되고 브라우저에서 해당 제공사 API로 직접 전송됩니다.
  *       (진짜 서비스라면 백엔드 프록시를 두어 키를 숨겨야 합니다.)
  */
 
@@ -66,6 +66,19 @@ ${question}
 2. 상세 근거: 조·항·호 번호를 명시하여 설명 (예: OO조례 제5조 제2항)
 3. 실무 권고사항: 사용자가 다음에 취해야 할 조치
 `;
+
+// 2026-09 기준 실제 사용 가능한(검증된) 모델만 등록
+const PROVIDER_MODELS = {
+  openai: ["gpt-5.5", "gpt-5.1", "gpt-4o-mini"],
+  gemini: ["gemini-3.5-flash", "gemini-2.5-pro", "gemini-2.5-flash"],
+  claude: ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"],
+};
+
+const PROVIDER_KEY_LABEL = {
+  openai: "OpenAI API Key",
+  gemini: "Google AI Studio (Gemini) API Key",
+  claude: "Anthropic (Claude) API Key",
+};
 
 let CHUNKS = [];
 
@@ -155,7 +168,7 @@ function formatInfraMarkdown(infraList) {
 }
 
 // ----------------------------------------------------------------
-// OpenAI 호출
+// 제공사별 LLM 호출 (모두 브라우저에서 직접 CORS 호출)
 // ----------------------------------------------------------------
 async function callOpenAI(apiKey, model, prompt) {
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -178,6 +191,57 @@ async function callOpenAI(apiKey, model, prompt) {
   return data.choices[0].message.content;
 }
 
+// Gemini generateContent REST API: 별도 CORS 헤더 없이 브라우저에서 직접 호출 가능
+async function callGemini(apiKey, model, prompt) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: { temperature: 0 },
+    }),
+  });
+  if (!res.ok) {
+    const errBody = await res.text();
+    throw new Error(`Gemini API 오류 (${res.status}): ${errBody}`);
+  }
+  const data = await res.json();
+  return data.candidates[0].content.parts.map((p) => p.text).join("");
+}
+
+// Anthropic Messages API: anthropic-dangerous-direct-browser-access 헤더로 브라우저 직접 호출 허용
+async function callClaude(apiKey, model, prompt) {
+  const res = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 2048,
+      temperature: 0,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  if (!res.ok) {
+    const errBody = await res.text();
+    throw new Error(`Claude API 오류 (${res.status}): ${errBody}`);
+  }
+  const data = await res.json();
+  return data.content.map((c) => c.text).join("");
+}
+
+async function callLLM(provider, apiKey, model, prompt) {
+  if (provider === "openai") return callOpenAI(apiKey, model, prompt);
+  if (provider === "gemini") return callGemini(apiKey, model, prompt);
+  if (provider === "claude") return callClaude(apiKey, model, prompt);
+  throw new Error(`알 수 없는 제공사: ${provider}`);
+}
+
 // ----------------------------------------------------------------
 // UI 로직
 // ----------------------------------------------------------------
@@ -185,15 +249,37 @@ const chatEl = document.getElementById("chat");
 const form = document.getElementById("chatForm");
 const input = document.getElementById("userQuery");
 const apiKeyInput = document.getElementById("apiKey");
+const apiKeyLabel = document.getElementById("apiKeyLabel");
+const providerSelect = document.getElementById("providerSelect");
 const regionFilter = document.getElementById("regionFilter");
 const topKInput = document.getElementById("topK");
 const topKValue = document.getElementById("topKValue");
 const modelName = document.getElementById("modelName");
 const statusMsg = document.getElementById("statusMsg");
 
-apiKeyInput.value = localStorage.getItem("openai_api_key") || "";
+function currentProvider() {
+  return providerSelect.value;
+}
+
+function refreshModelOptions() {
+  const provider = currentProvider();
+  modelName.innerHTML = "";
+  PROVIDER_MODELS[provider].forEach((m) => {
+    const opt = document.createElement("option");
+    opt.value = m;
+    opt.textContent = m;
+    modelName.appendChild(opt);
+  });
+  apiKeyLabel.textContent = PROVIDER_KEY_LABEL[provider];
+  apiKeyInput.placeholder = provider === "openai" ? "sk-..." : provider === "gemini" ? "AIza..." : "sk-ant-...";
+  apiKeyInput.value = localStorage.getItem(`${provider}_api_key`) || "";
+}
+
+providerSelect.addEventListener("change", refreshModelOptions);
+refreshModelOptions();
+
 apiKeyInput.addEventListener("change", () => {
-  localStorage.setItem("openai_api_key", apiKeyInput.value);
+  localStorage.setItem(`${currentProvider()}_api_key`, apiKeyInput.value);
 });
 topKInput.addEventListener("input", () => {
   topKValue.textContent = topKInput.value;
@@ -215,7 +301,7 @@ form.addEventListener("submit", async (e) => {
   if (!question) return;
 
   if (!apiKey) {
-    statusMsg.textContent = "👈 왼쪽 패널에 OpenAI API Key를 입력해야 서비스를 시작할 수 있습니다.";
+    statusMsg.textContent = `👈 왼쪽 패널에 ${PROVIDER_KEY_LABEL[currentProvider()]}를 입력해야 서비스를 시작할 수 있습니다.`;
     return;
   }
   statusMsg.textContent = "";
@@ -226,6 +312,7 @@ form.addEventListener("submit", async (e) => {
   const region = regionFilter.value;
   const k = parseInt(topKInput.value, 10);
   const model = modelName.value;
+  const provider = currentProvider();
 
   const loadingDiv = appendMessage("assistant", "관련 광주/전남 조례 및 규정을 검색 중입니다...");
 
@@ -233,7 +320,7 @@ form.addEventListener("submit", async (e) => {
     const docs = search(question, region, k);
     const context = formatContext(docs);
     const prompt = SYSTEM_TEMPLATE(context, question);
-    const answer = await callOpenAI(apiKey, model, prompt);
+    const answer = await callLLM(provider, apiKey, model, prompt);
     const categories = docs.map((d) => d.category || "");
     const infra = recommendInfra(question, categories);
     loadingDiv.textContent = answer + "\n\n" + formatInfraMarkdown(infra);
