@@ -87,6 +87,40 @@ export OPENAI_API_KEY=sk-...
 python -m eval.evaluate_ragas
 ```
 
+## 🌐 GitHub Pages 배포 (정적 웹 데모)
+
+서버 없이 실제 사용자가 웹 브라우저에서 바로 사용할 수 있도록 `docs/` 폴더에 정적 페이지 버전을 함께 제공합니다.
+
+- `docs/index.html` / `docs/styles.css` / `docs/app.js`: 순수 HTML/CSS/JS로 구현된 챗봇 UI
+- `docs/data/chunks.json`: `src/ingestion/chunker.py`로 생성한 구조적 청킹 결과(조·항·호 보존 + 메타데이터)를 정적 데이터로 내보낸 파일
+- 검색: 서버가 없으므로 Python의 BM25+임베딩 하이브리드 검색 대신, 브라우저에서 동작하는 **TF-IDF 기반 경량 키워드 검색**으로 관련 조문을 찾습니다.
+- 생성: 사용자가 입력한 **OpenAI API Key**로 브라우저가 OpenAI Chat Completions API를 직접 호출합니다. 키는 `localStorage`에만 저장되고 GitHub Pages 서버로는 전송되지 않습니다.
+- 지역 인프라 연계 로직(`infra_mapping.py`)도 `app.js`에 동일하게 이식되어 있습니다.
+
+### 배포 방법
+
+1. 이 저장소를 GitHub에 푸시합니다 (이미 완료된 상태라면 생략).
+2. GitHub 저장소 **Settings → Pages** 로 이동합니다.
+3. **Source**를 `Deploy from a branch`로 설정하고, 브랜치는 배포하려는 브랜치(예: `main` 또는 이 기능 브랜치), 폴더는 **`/docs`** 를 선택 후 저장합니다.
+4. 잠시 후 `https://<사용자명>.github.io/<저장소명>/` 주소로 접속하면 정적 데모 페이지가 열립니다.
+5. 페이지 접속 후 좌측 패널에 OpenAI API Key를 입력하면 바로 질의응답을 사용할 수 있습니다.
+
+> ⚠️ 브라우저에서 직접 API 키를 사용하는 방식은 프로토타입/데모 용도입니다. 실제 서비스로 운영 시에는 키를 서버(백엔드 프록시)에 보관하고, 프런트엔드는 그 백엔드만 호출하도록 구조를 변경해야 합니다.
+
+### 정적 데이터 갱신
+
+`data/laws.json`을 수정한 뒤 아래 명령으로 `docs/data/chunks.json`을 다시 생성하면 정적 페이지에도 반영됩니다.
+
+```bash
+python3 -c "
+import json
+from src.ingestion.chunker import load_and_chunk
+chunks = load_and_chunk('data/laws.json')
+out = [{'id': i, 'text': c.text, **c.metadata} for i, c in enumerate(chunks)]
+json.dump(out, open('docs/data/chunks.json', 'w'), ensure_ascii=False, indent=2)
+"
+```
+
 ## 향후 계획 (제안서 (d) 프로젝트 계획 반영)
 
 - [x] 법률 데이터 구조 설계 (조·항·호) 및 구조적 청킹 구현
